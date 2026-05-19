@@ -8,7 +8,7 @@ import type { Env } from './env';
 import { json } from './utils';
 import { clearSessionCookie, getSessionCookie, hashPassword, newSessionId, setSessionCookie, signSession, verifyPassword, verifySession } from './auth';
 import { createJob, createUser, getJob, getUserByEmail, getUserById, listJobs, setUserStatus } from './db';
-import { presignGet, presignPut } from './r2';
+import { presignGet, presignPut } from './storage';
 import { handleJobMessage } from './consumer';
 import { AuthLoginSchema, AuthSignupSchema, CreateJobSchema } from '@xfarming/shared';
 

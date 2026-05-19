@@ -1,6 +1,6 @@
 import type { Env } from './env';
 import { getJob, markJobDone, markJobFailed, markJobRunning } from './db';
-import { presignGet, presignPut } from './r2';
+import { presignGet, presignPut } from './storage';
 
 type JobMessage = {
   jobId: string;

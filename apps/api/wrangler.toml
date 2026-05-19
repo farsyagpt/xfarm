@@ -1,27 +1,29 @@
 name = "xfarming-api"
 main = "src/index.ts"
-compatibility_date = "2026-05-19"
+compatibility_date = "2026-05-20"
 
 [vars]
 # Dev: override with actual Pages URL in production via Cloudflare dashboard
-APP_ORIGIN = "https://xfarming-web.pages.dev"
+APP_ORIGIN = "http://localhost:5173"
 
 # ── Secrets (set via `wrangler secret put <NAME>` or Cloudflare dashboard) ──
-# JWT_SECRET          — random 32+ char string
-# ADMIN_SECRET        — random 32+ char string for /api/admin/* endpoints
-# R2_ACCOUNT_ID       — Cloudflare account ID
-# R2_ACCESS_KEY_ID    — R2 API token access key
-# R2_SECRET_ACCESS_KEY — R2 API token secret
-# R2_BUCKET_NAME      — e.g. "xfarming"
-# HF_STUDIO_BASE_URL  — e.g. "https://farsyagpt-xfarm.hf.space"
-# HF_XFARM_BASE_URL   — same Space or separate; e.g. "https://farsyagpt-xfarm.hf.space"
+# JWT_SECRET              — random 32+ char string
+# ADMIN_SECRET            — random 32+ char string for /api/admin/* endpoints
+#
+# Supabase Storage (S3-compatible, free tier 1GB)
+# SUPABASE_URL            — e.g. https://xxxx.supabase.co
+# SUPABASE_S3_ACCESS_KEY  — Supabase dashboard → Storage → S3 Access Keys
+# SUPABASE_S3_SECRET_KEY  — same
+# SUPABASE_BUCKET         — bucket name, e.g. "xfarming"
+#
+# HF Spaces
+# HF_STUDIO_BASE_URL      — e.g. https://farsyagpt-xfarm.hf.space
+# HF_XFARM_BASE_URL       — same or separate Space URL
 
 [[d1_databases]]
 binding = "DB"
 database_name = "xfarming"
-# Run: wrangler d1 create xfarming  → paste the returned database_id below
 database_id = "b4928b74-b60a-4369-8aca-5dc318e294a4"
-migrations_dir = "../../infra/d1/migrations"
 
 [[queues.producers]]
 binding = "JOBS"
