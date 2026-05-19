@@ -1,10 +1,10 @@
 name = "xfarming-api"
 main = "src/index.ts"
-compatibility_date = "2026-05-20"
+compatibility_date = "2026-05-19"
 
 [vars]
 # Dev: override with actual Pages URL in production via Cloudflare dashboard
-APP_ORIGIN = "http://localhost:5173"
+APP_ORIGIN = "https://xfarming.pages.dev"
 
 # ── Secrets (set via `wrangler secret put <NAME>` or Cloudflare dashboard) ──
 # JWT_SECRET              — random 32+ char string
