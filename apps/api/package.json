@@ -1,0 +1,26 @@
+{
+  "name": "@xfarming/api",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "lint": "eslint .",
+    "build": "wrangler deploy --dry-run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.832.0",
+    "@aws-sdk/s3-request-presigner": "^3.832.0",
+    "@hono/zod-validator": "^0.4.3",
+    "@xfarming/shared": "workspace:*",
+    "hono": "^4.8.5",
+    "jose": "^5.10.0",
+    "nanoid": "^5.1.5",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250529.0",
+    "wrangler": "^4.19.2"
+  }
+}

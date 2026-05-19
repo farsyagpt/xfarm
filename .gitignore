@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+.wrangler/
+
+# Env
+.env
+.env.*
+
+# Logs
+*.log
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Python / HF services
+.venv/
+__pycache__/
+*.pyc
+
+# Output artifacts (Wajib tidak masuk repo)
+output/
+outputs/
+OUTPUT_VIDEOS/
+TEMP_UPLOADS/
+*.mp4
+*.zip

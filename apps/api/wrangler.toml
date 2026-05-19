@@ -1,0 +1,25 @@
+name = "xfarming-api"
+main = "src/index.ts"
+compatibility_date = "2026-05-20"
+
+[vars]
+APP_ORIGIN = "http://localhost:5173"
+# Set di Cloudflare:
+# JWT_SECRET, ADMIN_SECRET
+# R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME
+# HF_STUDIO_BASE_URL (mis. https://farsyagpt-hf-studio.hf.space)
+# HF_XFARM_BASE_URL (mis. https://farsyagpt-xfarm.hf.space atau https://farsyagpt-xfarm.hf.space/api)
+
+[[d1_databases]]
+binding = "DB"
+database_name = "xfarming"
+database_id = "REPLACE_ME"
+
+[[queues.producers]]
+binding = "JOBS"
+queue = "xfarming-jobs"
+
+[[queues.consumers]]
+queue = "xfarming-jobs"
+max_batch_size = 5
+max_batch_timeout = 30
