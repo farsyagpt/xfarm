@@ -2,10 +2,14 @@
   "name": "xfarming",
   "private": true,
   "packageManager": "pnpm@11.1.3",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=11.0.0"
+  },
   "type": "module",
   "scripts": {
     "dev": "pnpm -r --parallel dev",
-    "build": "pnpm -r build",
+    "build": "pnpm --filter @xfarming/web build",
     "lint": "pnpm -r lint",
     "format": "prettier . --write",
     "format:check": "prettier . --check"
