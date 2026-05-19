@@ -31,9 +31,9 @@ export async function handleJobMessage(env: Env, msg: JobMessage) {
     );
 
     let endpoint = '';
-    if (job.type === 'infinity') endpoint = `${env.HF_STUDIO_BASE_URL.replace(/\\/$/, '')}/infinity/render`;
-    if (job.type === 'trendline') endpoint = `${env.HF_STUDIO_BASE_URL.replace(/\\/$/, '')}/trendline/render`;
-    if (job.type === 'xfarm') endpoint = `${env.HF_XFARM_BASE_URL.replace(/\\/$/, '')}/api/bulk`;
+    if (job.type === 'infinity') endpoint = `${env.HF_STUDIO_BASE_URL.replace(/\/$/, '')}/infinity/render`;
+    if (job.type === 'trendline') endpoint = `${env.HF_STUDIO_BASE_URL.replace(/\/$/, '')}/trendline/render`;
+    if (job.type === 'xfarm') endpoint = `${env.HF_XFARM_BASE_URL.replace(/\/$/, '')}/api/bulk`;
 
     const resp = await fetch(endpoint, {
       method: 'POST',

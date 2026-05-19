@@ -1,10 +1,10 @@
 name = "xfarming-api"
 main = "src/index.ts"
-compatibility_date = "2026-05-20"
+compatibility_date = "2026-05-19"
 
 [vars]
 # Dev: override with actual Pages URL in production via Cloudflare dashboard
-APP_ORIGIN = "http://localhost:5173"
+APP_ORIGIN = "https://xfarming-web.pages.dev"
 
 # ── Secrets (set via `wrangler secret put <NAME>` or Cloudflare dashboard) ──
 # JWT_SECRET          — random 32+ char string
@@ -20,7 +20,8 @@ APP_ORIGIN = "http://localhost:5173"
 binding = "DB"
 database_name = "xfarming"
 # Run: wrangler d1 create xfarming  → paste the returned database_id below
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "b4928b74-b60a-4369-8aca-5dc318e294a4"
+migrations_dir = "../../infra/d1/migrations"
 
 [[queues.producers]]
 binding = "JOBS"
