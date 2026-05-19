@@ -9,49 +9,98 @@ app_file: app.py
 pinned: false
 ---
 
-# xfarming (monorepo)
+# xfarming
 
-Stack:
-- Frontend: React + Vite (Cloudflare Pages)
-- API + Orchestrator: Cloudflare Workers + D1 + Queues
-- Storage: Cloudflare R2 (S3 API presigned URLs)
-- Compute: HuggingFace Spaces
+Content factory: Hero Video, Trendline, XFarm — satu dashboard, deploy di Cloudflare + HuggingFace.
+
+## Stack
+
+| Layer | Tech |
+|-------|------|
+| Frontend | React 19 + Vite → Cloudflare Pages |
+| API + Orchestrator | Hono on Cloudflare Workers |
+| Database | Cloudflare D1 (SQLite) |
+| Storage | Cloudflare R2 (presigned URLs) |
+| Job Queue | Cloudflare Queues |
+| Compute | HuggingFace Spaces (Python) |
 
 ## Struktur
-- `apps/web` — frontend
-- `apps/api` — Cloudflare Worker (API + Queue consumer)
-- `packages/shared` — shared zod schemas/types
-- `infra/d1/migrations` — D1 schema
-- `services/hf-studio` — 1 HF Space gabungan (Infinity + Trendline) (placeholder)
-- `services/xfarm-service` — XFarm (placeholder)
 
-## Jalanin lokal (dev)
+```
+apps/
+  web/          React + Vite frontend (Cloudflare Pages)
+  api/          Cloudflare Worker — REST API + Queue consumer
 
-### 1) Install deps
-```bash
-pnpm -C . install
+packages/
+  shared/       Zod schemas & TypeScript types (shared between web + api)
+
+services/
+  hf-studio/    HF Space: /infinity/render + /trendline/render
+  xfarm-service/ HF Space: /api/bulk (XFarm RSS → carousel ZIP)
+
+hf/
+  agenxy.py         XFarm bulk engine (RSS fetch, image gen, carousel overlay)
+  infinity.py       INFINITY pipeline (TTS, audio enhance, subtitle render)
+  trendline_engine.py  Trendline animated chart renderer
+
+infra/
+  d1/migrations/  D1 SQL schema
+
+app.py            HF Space entry point (unified: all 3 engines + Gradio UI)
+requirements.txt  Python deps for HF Space
 ```
 
-### 2) Jalankan API (Workers)
-Masuk `apps/api/wrangler.toml` dan isi `database_id` + env vars.
+## Flow
 
-Dev:
+1. User upload input (video/CSV) → web calls `POST /api/jobs` → gets presigned PUT URL
+2. Web uploads file directly to R2 via presigned PUT
+3. Web calls `POST /api/jobs/:id/start` → Worker enqueues job to Cloudflare Queue
+4. Queue consumer calls HF Space endpoint with presigned GET (input) + PUT (output)
+5. HF Space runs compute, uploads result to R2
+6. Web polls `GET /api/jobs/:id` until `done`, then downloads via `/api/jobs/:id/download`
+
+## Setup
+
+### 1. Install deps
+
 ```bash
+pnpm install
+```
+
+### 2. Create D1 database
+
+```bash
+wrangler d1 create xfarming
+# Paste the returned database_id into apps/api/wrangler.toml
+wrangler d1 execute xfarming --file=infra/d1/migrations/0001_init.sql
+```
+
+### 3. Set secrets
+
+```bash
+wrangler secret put JWT_SECRET
+wrangler secret put ADMIN_SECRET
+wrangler secret put R2_ACCOUNT_ID
+wrangler secret put R2_ACCESS_KEY_ID
+wrangler secret put R2_SECRET_ACCESS_KEY
+wrangler secret put R2_BUCKET_NAME
+wrangler secret put HF_STUDIO_BASE_URL   # e.g. https://farsyagpt-xfarm.hf.space
+wrangler secret put HF_XFARM_BASE_URL    # same or separate Space
+```
+
+### 4. Dev
+
+```bash
+# API (Workers)
 pnpm -C apps/api dev
-```
 
-### 3) Jalankan web
-```bash
+# Web
 pnpm -C apps/web dev
 ```
 
-Web akan proxy `/api/*` ke `http://localhost:8787`.
+## Notes
 
-## Notes penting
-- Output besar (mp4/zip) **wajib** disimpan di R2, bukan di repo.
-- Flow job:
-  1) Web create job → dapat presigned PUT untuk input (video/csv)
-  2) Web upload input → start job (enqueue)
-  3) Queue consumer call HF → HF upload output ke R2 via presigned PUT
-  4) Web download via `/api/jobs/:id/download` (presigned GET)
-
+- Output besar (mp4/zip) **wajib** di R2, tidak pernah di repo
+- `node_modules/`, `dist/`, `.wrangler/`, `output/`, `*.mp4`, `*.zip` sudah di `.gitignore`
+- Cookie session pakai `HttpOnly; Secure; SameSite=Lax` (JWT HS256, 14 hari)
+- Aktivasi akun manual: `POST /api/admin/users/:id/activate` dengan header `x-admin-secret`

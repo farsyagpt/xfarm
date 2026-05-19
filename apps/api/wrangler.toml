@@ -3,17 +3,24 @@ main = "src/index.ts"
 compatibility_date = "2026-05-20"
 
 [vars]
+# Dev: override with actual Pages URL in production via Cloudflare dashboard
 APP_ORIGIN = "http://localhost:5173"
-# Set di Cloudflare:
-# JWT_SECRET, ADMIN_SECRET
-# R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME
-# HF_STUDIO_BASE_URL (mis. https://farsyagpt-hf-studio.hf.space)
-# HF_XFARM_BASE_URL (mis. https://farsyagpt-xfarm.hf.space atau https://farsyagpt-xfarm.hf.space/api)
+
+# ── Secrets (set via `wrangler secret put <NAME>` or Cloudflare dashboard) ──
+# JWT_SECRET          — random 32+ char string
+# ADMIN_SECRET        — random 32+ char string for /api/admin/* endpoints
+# R2_ACCOUNT_ID       — Cloudflare account ID
+# R2_ACCESS_KEY_ID    — R2 API token access key
+# R2_SECRET_ACCESS_KEY — R2 API token secret
+# R2_BUCKET_NAME      — e.g. "xfarming"
+# HF_STUDIO_BASE_URL  — e.g. "https://farsyagpt-xfarm.hf.space"
+# HF_XFARM_BASE_URL   — same Space or separate; e.g. "https://farsyagpt-xfarm.hf.space"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "xfarming"
-database_id = "REPLACE_ME"
+# Run: wrangler d1 create xfarming  → paste the returned database_id below
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
 
 [[queues.producers]]
 binding = "JOBS"

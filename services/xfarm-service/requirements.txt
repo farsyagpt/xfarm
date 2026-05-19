@@ -1,0 +1,10 @@
+fastapi==0.115.12
+uvicorn[standard]==0.34.3
+requests==2.32.3
+
+# XFarm (Agenxy)
+huggingface-hub>=0.20.0,<0.26.0
+feedparser>=6.0.10
+Pillow>=10.0.0
+gradio>=4.44.1
+gradio_client>=0.8.0

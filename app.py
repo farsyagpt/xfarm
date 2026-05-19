@@ -1,3 +1,15 @@
+"""
+xfarming HF Space — unified compute entry point
+================================================
+Serves all three compute pipelines from a single HuggingFace Space:
+  GET  /health              — Health check
+  POST /infinity/render     — Hero Video (INFINITY pipeline)
+  POST /trendline/render    — Trendline animated chart
+  POST /api/bulk            — XFarm bulk RSS → carousel ZIP
+  /                         — Gradio UI (XFarm studio, mounted at root)
+
+All output is written to /tmp — nothing large is stored in the repo.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -15,10 +27,10 @@ from hf.agenxy import create_ui as create_xfarm_ui
 from hf.infinity import AutoSubtitlePipeline
 from hf.trendline_engine import render_dynamic_video
 
-# HF Spaces: pakai /tmp supaya tidak memenuhi repo
+# HF Spaces: always write to /tmp so nothing pollutes the repo
 os.environ.setdefault("OUTPUT_DIR", "/tmp/outputs")
 
-api = FastAPI(title="xfarming space", version="0.1.0")
+api = FastAPI(title="xfarming space", version="1.0.0")
 
 
 class RenderRequest(BaseModel):
@@ -28,7 +40,8 @@ class RenderRequest(BaseModel):
     payload: Dict[str, Any] = {}
 
 
-def _download_to_file(url: str, dst_path: str):
+def _download_to_file(url: str, dst_path: str) -> None:
+    """Stream-download a URL to a local file path."""
     r = requests.get(url, stream=True, timeout=180)
     r.raise_for_status()
     with open(dst_path, "wb") as f:
@@ -37,9 +50,15 @@ def _download_to_file(url: str, dst_path: str):
                 f.write(chunk)
 
 
-def _upload_file(upload_url: str, file_path: str, content_type: str):
+def _upload_file(upload_url: str, file_path: str, content_type: str) -> None:
+    """Upload a local file to a presigned PUT URL (R2)."""
     with open(file_path, "rb") as f:
-        r = requests.put(upload_url, data=f, headers={"content-type": content_type}, timeout=180)
+        r = requests.put(
+            upload_url,
+            data=f,
+            headers={"content-type": content_type},
+            timeout=180,
+        )
     r.raise_for_status()
 
 
@@ -50,11 +69,16 @@ def health():
 
 @api.post("/infinity/render")
 def infinity_render(req: RenderRequest):
+    """
+    Download input video from R2, run INFINITY subtitle+voice pipeline,
+    upload resulting mp4 back to R2 via presigned PUT.
+    """
     if not req.input_url:
         raise HTTPException(status_code=400, detail="input_url required")
+
     story = str(req.payload.get("story") or "").strip()
     if len(story) < 10:
-        raise HTTPException(status_code=400, detail="payload.story terlalu pendek")
+        raise HTTPException(status_code=400, detail="payload.story terlalu pendek (min 10 karakter)")
 
     voice_gender = str(req.payload.get("voice_gender") or "male").strip().lower()
     if voice_gender not in {"male", "female"}:
@@ -67,7 +91,12 @@ def infinity_render(req: RenderRequest):
 
         _download_to_file(req.input_url, video_in)
 
-        pipeline = AutoSubtitlePipeline(video_in, story, voice_gender=voice_gender, output_dir=out_dir)
+        pipeline = AutoSubtitlePipeline(
+            video_path=video_in,
+            caption_text=story,
+            voice_gender=voice_gender,
+            output_dir=out_dir,
+        )
         output_path = asyncio.run(pipeline.run())
 
         _upload_file(req.upload_url, output_path, content_type="video/mp4")
@@ -77,6 +106,10 @@ def infinity_render(req: RenderRequest):
 
 @api.post("/trendline/render")
 def trendline_render(req: RenderRequest):
+    """
+    Download input CSV from R2, render animated trendline mp4,
+    upload result back to R2 via presigned PUT.
+    """
     if not req.input_url:
         raise HTTPException(status_code=400, detail="input_url required")
 
@@ -108,12 +141,17 @@ def trendline_render(req: RenderRequest):
 
 
 class _DummyProgress:
+    """No-op progress callback so bulk_process works outside Gradio context."""
     def __call__(self, *_args, **_kwargs):
         return None
 
 
 @api.post("/api/bulk")
 def xfarm_bulk(req: RenderRequest):
+    """
+    Run XFarm bulk content generation from RSS feeds,
+    then upload the resulting ZIP to R2 via presigned PUT.
+    """
     feed = str(req.payload.get("feed") or "🔥 Aggregated (60+ Feeds)")
     max_items = int(req.payload.get("maxItems") or 10)
     provider = str(req.payload.get("provider") or "pollinations")
@@ -121,7 +159,6 @@ def xfarm_bulk(req: RenderRequest):
     model_choice = req.payload.get("model_choice")
     hf_token = str(req.payload.get("hf_token") or "").strip()
 
-    # Pastikan output ditulis ke /tmp
     os.environ["OUTPUT_DIR"] = os.environ.get("OUTPUT_DIR", "/tmp/outputs")
 
     zip_path, status = xfarm_bulk_process(
@@ -133,14 +170,15 @@ def xfarm_bulk(req: RenderRequest):
         model_choice,
         progress=_DummyProgress(),
     )
+
     if not zip_path:
-        raise HTTPException(status_code=500, detail=str(status or "bulk failed"))
+        raise HTTPException(status_code=500, detail=str(status or "bulk process failed"))
 
     _upload_file(req.upload_url, zip_path, content_type="application/zip")
+
     return {"ok": True, "job_id": req.job_id, "status": status}
 
 
-# Mount Gradio UI (Agenxy) ke root path
+# Mount Gradio XFarm UI at root path
 xfarm_ui = create_xfarm_ui()
 app = gr.mount_gradio_app(api, xfarm_ui, path="/")
-

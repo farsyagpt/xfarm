@@ -41,8 +41,8 @@ export function setSessionCookie(res: Response, jwt: string) {
     `${COOKIE_NAME}=${jwt}`,
     'Path=/',
     'HttpOnly',
+    'Secure',
     'SameSite=Lax',
-    // TODO: set Secure saat sudah https
   ].join('; ');
   res.headers.append('Set-Cookie', cookie);
 }

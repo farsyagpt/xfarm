@@ -1,14 +1,40 @@
 # xfarm-service
 
-Service ini disiapkan untuk kode XFarm.
+FastAPI service for **XFarm** bulk content generation (RSS → carousel image assets ZIP).
 
-- GitHub target: https://github.com/farsyagpt/xfarm
-- HF Space target: https://huggingface.co/spaces/farsyagpt/xfarm
+Deployed as a HuggingFace Space. Called by the Cloudflare Queue consumer.
 
-Catatan:
-Repo GitHub `farsyagpt/xfarm` saat ini ter-clone sebagai **empty repository** di environment ini, jadi folder ini masih placeholder.
+## Endpoints
 
-Next step:
-- Import source dari `c:\\Users\\farsya\\ENGAGEMENT\\XFarm\\Agenxy` (atau source asli XFarm) ke sini
-- Expose endpoint API (minimal `/api/bulk`) yang kompatibel dengan consumer Worker
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check |
+| POST | `/api/bulk` | Fetch RSS feeds → generate carousel images → upload ZIP to R2 |
 
+## Request body
+
+```json
+{
+  "job_id": "string",
+  "upload_url": "presigned PUT URL to R2",
+  "payload": {
+    "feed": "🔥 Aggregated (60+ Feeds)",
+    "maxItems": 10,
+    "provider": "pollinations|hf-space|hf-inference",
+    "space_id": "optional HF Space ID for image gen",
+    "model_choice": "optional model ID",
+    "hf_token": "optional HF token"
+  }
+}
+```
+
+## Run locally
+
+```bash
+pip install -r requirements.txt
+python main.py
+```
+
+## Deploy to HF Space
+
+Set `HF_XFARM_BASE_URL` in `wrangler.toml` / Cloudflare secrets to point to this Space URL.

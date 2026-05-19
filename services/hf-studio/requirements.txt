@@ -1,3 +1,16 @@
 fastapi==0.115.12
 uvicorn[standard]==0.34.3
 requests==2.32.3
+
+# INFINITY (Hero Video)
+moviepy>=1.0.3
+imageio[ffmpeg]>=2.31.1
+imageio-ffmpeg>=0.4.8
+pydub>=0.25.1
+edge-tts>=6.1.9
+numpy>=1.24.0
+
+# Trendline
+pandas>=2.2.0
+matplotlib>=3.8.0
+Pillow>=10.0.0

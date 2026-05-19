@@ -1,24 +1,42 @@
-# hf-studio (HuggingFace Space)
+# hf-studio
 
-Satu Space untuk 2 engine:
+FastAPI service for **Hero Video (INFINITY)** and **Trendline** compute.
 
-- `POST /infinity/render`
-- `POST /trendline/render`
+Deployed as a HuggingFace Space. Called by the Cloudflare Queue consumer.
 
-Kontrak request (dari Cloudflare Queue consumer):
+## Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check |
+| POST | `/infinity/render` | Download input video → run INFINITY pipeline → upload mp4 to R2 |
+| POST | `/trendline/render` | Download input CSV → render trendline mp4 → upload to R2 |
+
+## Request body (all POST)
 
 ```json
 {
-  "job_id": "xxx",
-  "input_url": "https://... (presigned GET dari R2, optional untuk xfarm)",
-  "upload_url": "https://... (presigned PUT ke R2)",
-  "payload": {}
+  "job_id": "string",
+  "input_url": "presigned GET URL from R2",
+  "upload_url": "presigned PUT URL to R2",
+  "payload": {
+    "story": "...",
+    "voice_gender": "male|female",
+    "title": "...",
+    "subtitle": "...",
+    "aspect_ratio": "16:9|9:16|4:3|1:1",
+    "theme": "black|white"
+  }
 }
 ```
 
-Saat ini masih **placeholder** (upload mp4 kosong) untuk ngetes plumbing end-to-end.
+## Run locally
 
-Next step:
-- copy/port engine INFINITY + Trendline ke sini
-- output mp4 beneran diupload ke `upload_url`
+```bash
+pip install -r requirements.txt
+python main.py
+```
 
+## Deploy to HF Space
+
+Set `HF_STUDIO_BASE_URL` in `wrangler.toml` / Cloudflare secrets to point to this Space URL.
