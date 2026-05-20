@@ -5,7 +5,7 @@
  *   https://<project-ref>.supabase.co/storage/v1/s3
  *
  * Required env vars:
- *   SUPABASE_URL          — e.g. https://xxxx.supabase.co
+ *   SUPABASE_URL           — e.g. https://xxxx.supabase.co
  *   SUPABASE_S3_ACCESS_KEY — from Supabase dashboard → Storage → S3 Access Keys
  *   SUPABASE_S3_SECRET_KEY — same
  *   SUPABASE_BUCKET        — bucket name, e.g. "xfarming"
@@ -16,11 +16,10 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { Env } from './env';
 
 function getClient(env: Env): S3Client {
-  // Supabase S3 endpoint: https://<ref>.supabase.co/storage/v1/s3
   const endpoint = `${env.SUPABASE_URL.replace(/\/$/, '')}/storage/v1/s3`;
 
   return new S3Client({
-    region: 'ap-southeast-1', // Supabase requires a region; ap-southeast-1 works globally
+    region: 'us-east-1', // Supabase S3 requires us-east-1 for signature validation
     endpoint,
     credentials: {
       accessKeyId: env.SUPABASE_S3_ACCESS_KEY,
