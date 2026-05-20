@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createJob, getJob, startJob, uploadToPresignedPut } from '../lib/jobs';
+import { downloadJob } from '../lib/api';
 
 type PhotoPos = 'center' | 'right';
 
@@ -20,8 +21,7 @@ export function HeroVideoPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  const downloadUrl = jobId ? `/api/jobs/${jobId}/download` : null;
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     if (!jobId) return;
@@ -283,14 +283,19 @@ export function HeroVideoPage() {
               </div>
             )}
 
-            {status === 'done' && downloadUrl && (
-              <a
-                href={downloadUrl}
+            {status === 'done' && jobId && (
+              <button
                 className="btn-primary"
-                style={{ display: 'flex', width: '100%', marginTop: 16, textDecoration: 'none', justifyContent: 'center', background: 'linear-gradient(135deg,#22c55e,#16a34a)' }}
+                style={{ display: 'flex', width: '100%', marginTop: 16, justifyContent: 'center', background: 'linear-gradient(135deg,#22c55e,#16a34a)' }}
+                disabled={downloading}
+                onClick={async () => {
+                  if (!jobId) return;
+                  setDownloading(true);
+                  try { await downloadJob(jobId); } catch (e) { setError(String(e)); } finally { setDownloading(false); }
+                }}
               >
-                ⬇️ Download MP4
-              </a>
+                {downloading ? '⏳ Mengunduh...' : '⬇️ Download MP4'}
+              </button>
             )}
           </div>
 

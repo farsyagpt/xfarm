@@ -6,7 +6,10 @@ export type Env = {
   JWT_SECRET: string;
   ADMIN_SECRET: string;
 
-  // Supabase Storage (S3-compatible)
+  // Worker's own public URL (for webhook callbacks from HF Space)
+  WORKER_BASE_URL: string; // e.g. https://xfarming-api.farsyagpt.workers.dev
+
+  // Supabase Storage (S3-compatible, free tier 1GB)
   SUPABASE_URL: string;           // e.g. https://xxxx.supabase.co
   SUPABASE_S3_ACCESS_KEY: string; // Storage → S3 Access Keys
   SUPABASE_S3_SECRET_KEY: string;

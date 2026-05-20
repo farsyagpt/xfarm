@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createJob, getJob, startJob, uploadToPresignedPut } from '../lib/jobs';
+import { downloadJob } from '../lib/api';
 
 type Period = 'daily' | 'monthly' | 'yearly';
 
@@ -22,7 +23,6 @@ export function TrendlinePage() {
 
   // Variabel Y
   const [labelY, setLabelY] = useState('Warteg + Investasi');
-  const [nominalY, setNominalY] = useState(50000);
   const [emojiY, setEmojiY] = useState('📈');
 
   // Breakdown Y
@@ -30,6 +30,9 @@ export function TrendlinePage() {
   const [nominalY1, setNominalY1] = useState(15000);
   const [labelY2, setLabelY2] = useState('Investasi');
   const [nominalY2, setNominalY2] = useState(35000);
+
+  // nominalY is always derived — no useState lag
+  const nominalY = nominalY1 + nominalY2;
 
   // Settings
   const [period, setPeriod] = useState<Period>('daily');
@@ -42,11 +45,9 @@ export function TrendlinePage() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
-  const downloadUrl = jobId ? `/api/jobs/${jobId}/download` : null;
-
-  // Auto-sync Y nominal
-  useEffect(() => { setNominalY(nominalY1 + nominalY2); }, [nominalY1, nominalY2]);
+  // Auto-sync Y nominal — removed (nominalY is now computed inline)
 
   // Auto-generate title
   useEffect(() => {
@@ -301,10 +302,19 @@ export function TrendlinePage() {
                 {jobId && <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)', fontFamily: 'monospace', wordBreak: 'break-all' }}>{jobId}</div>}
               </div>
             )}
-            {status === 'done' && downloadUrl && (
-              <a href={downloadUrl} className="btn-primary" style={{ display: 'flex', width: '100%', marginTop: 12, textDecoration: 'none', justifyContent: 'center', background: 'linear-gradient(135deg,#22c55e,#16a34a)' }}>
-                ⬇️ Download MP4
-              </a>
+            {status === 'done' && jobId && (
+              <button
+                className="btn-primary"
+                style={{ display: 'flex', width: '100%', marginTop: 12, justifyContent: 'center', background: 'linear-gradient(135deg,#22c55e,#16a34a)' }}
+                disabled={downloading}
+                onClick={async () => {
+                  if (!jobId) return;
+                  setDownloading(true);
+                  try { await downloadJob(jobId); } catch (e) { setError(String(e)); } finally { setDownloading(false); }
+                }}
+              >
+                {downloading ? '⏳ Mengunduh...' : '⬇️ Download MP4'}
+              </button>
             )}
           </div>
         </div>

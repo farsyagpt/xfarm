@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createJob, getJob } from '../lib/jobs';
+import { downloadJob } from '../lib/api';
 
 const FEEDS = [
   { value: '🔥 Aggregated (60+ Feeds)', label: '🔥 Semua Sumber (60+ Feed)', desc: 'Agregasi dari semua sumber aktif' },
@@ -24,8 +25,10 @@ export function XFarmPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   const downloadUrl = jobId ? `/api/jobs/${jobId}/download` : null;
+  void downloadUrl; // kept for reference, actual download uses downloadJob()
 
   useEffect(() => {
     if (!jobId) return;
@@ -217,10 +220,19 @@ export function XFarmPage() {
                 {jobId && <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)', fontFamily: 'monospace', wordBreak: 'break-all' }}>{jobId}</div>}
               </div>
             )}
-            {status === 'done' && downloadUrl && (
-              <a href={downloadUrl} className="btn-primary" style={{ display: 'flex', width: '100%', marginTop: 12, textDecoration: 'none', justifyContent: 'center', background: 'linear-gradient(135deg,#22c55e,#16a34a)' }}>
-                ⬇️ Download ZIP
-              </a>
+            {status === 'done' && jobId && (
+              <button
+                className="btn-primary"
+                style={{ display: 'flex', width: '100%', marginTop: 12, justifyContent: 'center', background: 'linear-gradient(135deg,#22c55e,#16a34a)' }}
+                disabled={downloading}
+                onClick={async () => {
+                  if (!jobId) return;
+                  setDownloading(true);
+                  try { await downloadJob(jobId); } catch (e) { setError(String(e)); } finally { setDownloading(false); }
+                }}
+              >
+                {downloading ? '⏳ Mengunduh...' : '⬇️ Download ZIP'}
+              </button>
             )}
           </div>
 

@@ -1,565 +1,396 @@
 """
-AUTO SUBTITLE & VOICE OVER - FIXED & OPTIMIZED
-===============================================
-Version 3.0 - Properly working with correct timing!
+INFINITY — Hero Video Pipeline
+================================
+Input  : PNG photo (transparent background) + narasi teks
+Output : MP4 video 9:16 dengan animasi foto dari bawah + TTS voice + subtitle
 
-Author: Claude AI
-Version: 3.0 (Complete Rewrite - Fixed)
+Flow:
+1. Generate TTS audio dari narasi
+2. Enhance audio (normalize, compress)
+3. Analyze word timings (uniform distribution)
+4. Composite foto PNG di atas background gradient
+5. Render video dengan animasi foto slide-up + subtitle word-by-word
+6. Output MP4
 """
 
-import os
-import sys
-import random
-import logging
-from pathlib import Path
-from datetime import datetime
-from typing import List, Tuple, Dict
+from __future__ import annotations
+
+import asyncio
 import json
+import logging
+import os
+import random
+import sys
+from datetime import datetime
+from pathlib import Path
+from typing import List, Dict
+
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 try:
-    from moviepy.editor import VideoFileClip, CompositeVideoClip, ImageClip, AudioFileClip, TextClip
-    from moviepy.video.VideoClip import VideoClip
-    import numpy as np
-    from PIL import Image, ImageDraw, ImageFont
+    from moviepy.editor import (
+        AudioFileClip,
+        CompositeVideoClip,
+        ImageClip,
+        ColorClip,
+    )
     from pydub import AudioSegment
     from pydub.effects import normalize, compress_dynamic_range
     import edge_tts
-    import asyncio
 except ImportError as e:
     raise ImportError(
-        f"{e}. Install dependencies: moviepy pydub edge-tts numpy pillow imageio[ffmpeg] imageio-ffmpeg"
+        f"{e}. Install: moviepy pydub edge-tts numpy pillow imageio[ffmpeg] imageio-ffmpeg"
     ) from e
 
-# Safe logging
-class SafeStreamHandler(logging.StreamHandler):
-    def emit(self, record):
-        try:
-            msg = self.format(record)
-            msg = msg.encode('ascii', 'ignore').decode('ascii')
-            self.stream.write(msg + self.terminator)
-            self.flush()
-        except:
-            self.handleError(record)
-
-log_file = f'subtitle_log_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+# ── Logging — always write to /tmp on HF Spaces ──
+_log_file = f"/tmp/infinity_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format="%(asctime)s %(levelname)s %(message)s",
     handlers=[
-        logging.FileHandler(log_file, encoding='utf-8'),
-        SafeStreamHandler()
-    ]
+        logging.FileHandler(_log_file, encoding="utf-8"),
+        logging.StreamHandler(sys.stdout),
+    ],
 )
 logger = logging.getLogger(__name__)
 
+# ── Video dimensions (9:16 portrait) ──
+VIDEO_W = 1080
+VIDEO_H = 1920
+FPS = 30
 
-class SubtitleConfig:
-    """Konfigurasi subtitle"""
-    
-    LAYOUTS = [
-        {"name": "Two Horizontal", "words_per_line": 2, "direction": "horizontal"},
-        {"name": "Single Vertical", "words_per_line": 1, "direction": "vertical"},
-        {"name": "Three Horizontal", "words_per_line": 3, "direction": "horizontal"},
-        {"name": "Four Horizontal", "words_per_line": 4, "direction": "horizontal"},
-        {"name": "Stagger Two", "words_per_line": 2, "direction": "stagger"},
-        {"name": "Pyramid", "words_per_line": "pyramid", "direction": "pyramid"},
-        {"name": "Five Horizontal", "words_per_line": 5, "direction": "horizontal"},
-        {"name": "Stagger Three", "words_per_line": 3, "direction": "stagger"},
-        {"name": "Compact", "words_per_line": 6, "direction": "horizontal"},
-        {"name": "Minimalist", "words_per_line": 2, "direction": "centered"}
-    ]
-    
-    SIZES = [
-        {"name": "Extra Large", "size": 120},
-        {"name": "Large", "size": 100},
-        {"name": "Large Medium", "size": 85},
-        {"name": "Medium Plus", "size": 75},
-        {"name": "Medium", "size": 65},
-        {"name": "Medium Small", "size": 55},
-        {"name": "Small Plus", "size": 48},
-        {"name": "Small", "size": 42},
-        {"name": "Tiny Plus", "size": 38},
-        {"name": "Tiny", "size": 32}
-    ]
-    
-    TEXT_COLOR = (255, 255, 255)
-    STROKE_COLOR = (0, 0, 0)
-    STROKE_WIDTH = 3
+# ── Background gradients ──
+GRADIENTS = [
+    [(5, 7, 15), (15, 20, 40)],
+    [(8, 5, 20), (20, 10, 40)],
+    [(5, 15, 10), (10, 30, 20)],
+    [(15, 5, 5), (35, 10, 15)],
+]
 
+
+# ══════════════════════════════════════════════════════════════
+# VOICE OVER
+# ══════════════════════════════════════════════════════════════
 
 class VoiceOverGenerator:
-    """Voice Over Generator"""
-    
     VOICES = {
-        'id': {
-            'male': 'id-ID-ArdiNeural',
-            'female': 'id-ID-GadisNeural'
-        },
-        'en': {
-            'male': 'en-US-GuyNeural',
-            'female': 'en-US-JennyNeural'
-        }
+        "male":   "id-ID-ArdiNeural",
+        "female": "id-ID-GadisNeural",
     }
-    
-    def __init__(self, language='id', gender='male'):
-        self.language = language
-        self.gender = gender
-        self.voice = self.VOICES[language][gender]
-        voice_label = "Cowok" if gender == 'male' else "Cewek"
-        logger.info(f"Voice: {self.voice} ({voice_label})")
-    
-    async def generate_tts(self, text: str, output_path: str) -> str:
-        logger.info(f"Generating TTS...")
-        try:
-            communicate = edge_tts.Communicate(text, self.voice)
-            await communicate.save(output_path)
-            logger.info(f"TTS saved: {output_path}")
-            return output_path
-        except Exception as e:
-            logger.error(f"TTS failed: {e}")
-            raise
-    
-    def enhance_audio(self, input_path: str, output_path: str) -> str:
-        logger.info("Enhancing audio...")
-        try:
-            audio = AudioSegment.from_file(input_path)
-            audio = normalize(audio)
-            audio = compress_dynamic_range(audio, threshold=-20.0, ratio=4.0)
-            
-            # Subtle reverb (50% reduced)
-            reverb = audio - 14
-            silence = AudioSegment.silent(duration=100)
-            echo = silence + reverb
-            audio_with_reverb = audio.overlay(echo[:len(audio)])
-            audio_with_reverb = normalize(audio_with_reverb)
-            
-            audio_with_reverb.export(output_path, format="mp3", bitrate="192k")
-            logger.info(f"Audio enhanced: {output_path}")
-            return output_path
-        except Exception as e:
-            logger.error(f"Audio enhancement failed: {e}")
-            raise
-    
-    async def generate_word_timings(self, text: str, audio_path: str) -> List[Dict]:
-        logger.info("Analyzing word timings...")
-        words = text.split()
-        audio = AudioSegment.from_file(audio_path)
-        duration = len(audio) / 1000.0
-        
-        words_timing = []
-        time_per_word = duration / len(words)
-        
-        for i, word in enumerate(words):
-            words_timing.append({
-                'word': word.upper(),  # UPPERCASE
-                'start': i * time_per_word,
-                'end': (i + 1) * time_per_word,
-                'index': i
-            })
-        
-        logger.info(f"Timings generated: {len(words)} words")
-        return words_timing
 
+    def __init__(self, gender: str = "male"):
+        self.voice = self.VOICES.get(gender, self.VOICES["male"])
+        logger.info("TTS voice: %s", self.voice)
 
-class TextImageGenerator:
-    """Generate text as transparent PNG images"""
-    
-    _font_cache = {}
-    
-    @classmethod
-    def get_font(cls, size: int):
-        """Get Arial Bold font with caching"""
-        if size in cls._font_cache:
-            return cls._font_cache[size]
-        
-        font_paths = [
-            'C:\\Windows\\Fonts\\ARIALBD.TTF',
-            'C:\\Windows\\Fonts\\arialbd.ttf',
-            'C:\\Windows\\Fonts\\Arial Bold.ttf',
-            '/System/Library/Fonts/Helvetica.ttc',
-            '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
-            'arial.ttf'
-        ]
-        
-        for font_path in font_paths:
-            if os.path.exists(font_path):
-                try:
-                    font = ImageFont.truetype(font_path, size)
-                    cls._font_cache[size] = font
-                    return font
-                except:
-                    continue
-        
-        font = ImageFont.load_default()
-        cls._font_cache[size] = font
-        return font
-    
+    async def generate(self, text: str, out_path: str) -> str:
+        communicate = edge_tts.Communicate(text, self.voice)
+        await communicate.save(out_path)
+        logger.info("TTS saved: %s", out_path)
+        return out_path
+
     @staticmethod
-    def create_text_image(text: str, fontsize: int, text_color: tuple, 
-                         stroke_color: tuple, stroke_width: int) -> Image.Image:
-        """Create text as transparent PNG"""
-        
-        font = TextImageGenerator.get_font(fontsize)
-        
-        # Measure text
-        temp_img = Image.new('RGBA', (1, 1), (0, 0, 0, 0))
-        temp_draw = ImageDraw.Draw(temp_img)
-        
-        try:
-            bbox = temp_draw.textbbox((0, 0), text, font=font, stroke_width=stroke_width)
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
-        except:
-            text_width, text_height = temp_draw.textsize(text, font=font)
-            text_width += stroke_width * 2
-            text_height += stroke_width * 2
-        
-        # Create image with padding
-        padding = stroke_width * 2 + 10
-        img_width = text_width + padding * 2
-        img_height = text_height + padding * 2
-        
-        # Transparent background
-        img = Image.new('RGBA', (img_width, img_height), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
-        
-        # Draw text with stroke
-        draw.text(
-            (padding, padding), 
-            text, 
-            font=font, 
-            fill=text_color + (255,),
-            stroke_width=stroke_width,
-            stroke_fill=stroke_color + (255,)
-        )
-        
-        return img
+    def enhance(in_path: str, out_path: str) -> str:
+        audio = AudioSegment.from_file(in_path)
+        audio = normalize(audio)
+        audio = compress_dynamic_range(audio, threshold=-20.0, ratio=4.0)
+        audio.export(out_path, format="mp3", bitrate="192k")
+        logger.info("Audio enhanced: %s", out_path)
+        return out_path
+
+    @staticmethod
+    def word_timings(text: str, audio_path: str) -> List[Dict]:
+        words = text.split()
+        duration = len(AudioSegment.from_file(audio_path)) / 1000.0
+        tpw = duration / max(len(words), 1)
+        return [
+            {"word": w.upper(), "start": i * tpw, "end": (i + 1) * tpw, "index": i}
+            for i, w in enumerate(words)
+        ]
 
 
-class VideoSubtitleCreator:
-    """Create video with cumulative subtitles"""
-    
-    def __init__(self, video_path: str):
-        self.video_path = video_path
-        self.video = VideoFileClip(video_path)
-        self.width = self.video.w
-        self.height = self.video.h
-        self.text_area_width = int(self.height)
-        
-        logger.info(f"Video: {video_path}")
-        logger.info(f"Size: {self.width}x{self.height}")
-        logger.info(f"Duration: {self.video.duration:.2f}s")
-    
-    def get_random_style(self) -> Tuple[Dict, Dict]:
-        layout = random.choice(SubtitleConfig.LAYOUTS)
-        size = random.choice(SubtitleConfig.SIZES)
-        logger.info(f"Style: {layout['name']}, {size['name']} ({size['size']}px)")
-        return layout, size
-    
-    def calculate_positions(self, words: List[str], layout: Dict, size: Dict) -> List[Tuple[str, int, int]]:
-        """Calculate word positions"""
-        positions = []
-        fontsize = size['size']
-        words_per_line = layout['words_per_line']
-        direction = layout['direction']
-        
-        start_x = 50
-        start_y = self.height // 3
-        line_height = fontsize + 20
-        word_spacing = fontsize // 2
-        
-        current_x = start_x
-        current_y = start_y
-        line_word_count = 0
-        
-        if direction == "horizontal":
-            for word in words:
-                positions.append((word, current_x, current_y))
-                line_word_count += 1
-                if line_word_count >= words_per_line:
-                    current_y += line_height
-                    current_x = start_x
-                    line_word_count = 0
-                else:
-                    current_x += len(word) * (fontsize // 2) + word_spacing
-        
-        elif direction == "vertical":
-            for word in words:
-                positions.append((word, start_x, current_y))
-                current_y += line_height
-        
-        elif direction == "stagger":
-            offset = 0
-            for word in words:
-                positions.append((word, current_x + offset, current_y))
-                line_word_count += 1
-                if line_word_count >= words_per_line:
-                    current_y += line_height
-                    current_x = start_x
-                    line_word_count = 0
-                    offset = 0 if offset == 50 else 50
-                else:
-                    current_x += len(word) * (fontsize // 2) + word_spacing
-        
-        elif direction == "pyramid":
-            pyramid_pattern = [1, 2, 3, 4, 3, 2, 1]
-            pattern_idx = 0
-            for word in words:
-                words_in_line = pyramid_pattern[pattern_idx % len(pyramid_pattern)]
-                indent = (4 - words_in_line) * (fontsize // 3)
-                positions.append((word, start_x + indent + (line_word_count * word_spacing * 2), current_y))
-                line_word_count += 1
-                if line_word_count >= words_in_line:
-                    current_y += line_height
-                    line_word_count = 0
-                    pattern_idx += 1
-        
-        elif direction == "centered":
-            for word in words:
-                center_x = (self.text_area_width - len(word) * (fontsize // 3)) // 2
-                positions.append((word, center_x, current_y))
-                line_word_count += 1
-                if line_word_count >= words_per_line:
-                    current_y += line_height
-                    line_word_count = 0
-        
-        return positions
-    
-    def create_subtitle_clips(self, words_data: List[Dict], layout: Dict, size: Dict) -> List[ImageClip]:
-        """Create cumulative subtitle clips - FIXED APPROACH"""
-        logger.info("Creating cumulative subtitle clips...")
-        
-        words = [w['word'] for w in words_data]
-        positions = self.calculate_positions(words, layout, size)
-        fontsize = size['size']
-        
-        # Pre-render word images
-        logger.info(f"Rendering {len(words)} word images (UPPERCASE)...")
-        word_images = []
-        for i, (word, x, y) in enumerate(positions):
+# ══════════════════════════════════════════════════════════════
+# BACKGROUND GENERATOR
+# ══════════════════════════════════════════════════════════════
+
+def make_background(seed: int = 0) -> np.ndarray:
+    """Generate a dark gradient background 1080×1920 RGBA."""
+    rng = random.Random(seed)
+    c1, c2 = rng.choice(GRADIENTS)
+    img = Image.new("RGBA", (VIDEO_W, VIDEO_H))
+    draw = ImageDraw.Draw(img)
+    for y in range(VIDEO_H):
+        t = y / VIDEO_H
+        r = int(c1[0] + (c2[0] - c1[0]) * t)
+        g = int(c1[1] + (c2[1] - c1[1]) * t)
+        b = int(c1[2] + (c2[2] - c1[2]) * t)
+        draw.line([(0, y), (VIDEO_W, y)], fill=(r, g, b, 255))
+    # Subtle noise
+    arr = np.array(img, dtype=np.float32)
+    noise = rng.uniform(-6, 6)
+    arr[:, :, :3] = np.clip(arr[:, :, :3] + noise, 0, 255)
+    return arr.astype(np.uint8)
+
+
+# ══════════════════════════════════════════════════════════════
+# PHOTO COMPOSITOR
+# ══════════════════════════════════════════════════════════════
+
+def composite_photo(
+    bg: np.ndarray,
+    photo_path: str,
+    position: str = "center",  # "center" | "right"
+    progress: float = 1.0,     # 0.0 → 1.0 (slide-up animation)
+) -> np.ndarray:
+    """
+    Composite a PNG photo (with transparency) onto the background.
+    progress=0 → photo fully below frame, progress=1 → final position.
+    """
+    frame = Image.fromarray(bg).convert("RGBA")
+    photo = Image.open(photo_path).convert("RGBA")
+
+    # Scale photo to fit ~70% of video height, maintain aspect ratio
+    max_h = int(VIDEO_H * 0.72)
+    max_w = int(VIDEO_W * 0.85)
+    photo.thumbnail((max_w, max_h), Image.LANCZOS)
+    pw, ph = photo.size
+
+    # Horizontal position
+    if position == "right":
+        px = VIDEO_W - pw - int(VIDEO_W * 0.04)
+    else:  # center
+        px = (VIDEO_W - pw) // 2
+
+    # Vertical: photo sits at bottom 15% of frame when fully in
+    final_py = VIDEO_H - ph - int(VIDEO_H * 0.08)
+
+    # Slide-up animation: start from below frame
+    start_py = VIDEO_H + 20
+    py = int(start_py + (final_py - start_py) * _ease_out_quart(progress))
+
+    # Soft shadow under photo
+    shadow = Image.new("RGBA", (pw + 40, ph + 40), (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow)
+    shadow_draw.ellipse([10, ph - 20, pw + 30, ph + 30], fill=(0, 0, 0, 80))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(radius=15))
+    frame.paste(shadow, (px - 20, py - 10), shadow)
+
+    # Paste photo with alpha
+    frame.paste(photo, (px, py), photo)
+
+    return np.array(frame.convert("RGB"))
+
+
+def _ease_out_quart(t: float) -> float:
+    s = 1.0 - min(max(t, 0.0), 1.0)
+    return 1.0 - s * s * s * s
+
+
+# ══════════════════════════════════════════════════════════════
+# SUBTITLE RENDERER
+# ══════════════════════════════════════════════════════════════
+
+def _get_font(size: int) -> ImageFont.FreeTypeFont:
+    paths = [
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "C:\\Windows\\Fonts\\ARIALBD.TTF",
+    ]
+    for p in paths:
+        if os.path.exists(p):
             try:
-                img = TextImageGenerator.create_text_image(
-                    word, fontsize,
-                    SubtitleConfig.TEXT_COLOR,
-                    SubtitleConfig.STROKE_COLOR,
-                    SubtitleConfig.STROKE_WIDTH
-                )
-                word_images.append((img, x, y, word))
-            except Exception as e:
-                logger.warning(f"Failed to render: {word}")
+                return ImageFont.truetype(p, size)
+            except Exception:
                 continue
-        
-        logger.info(f"Rendered {len(word_images)} images successfully")
-        
-        # Create cumulative composite images for each word appearance
-        all_clips = []
-        
-        for i in range(len(words_data)):
-            # Create composite image showing words 0 to i
-            composite = Image.new('RGBA', (self.width, self.height), (0, 0, 0, 0))
-            
-            for j in range(i + 1):
-                if j < len(word_images):
-                    img, x, y, word = word_images[j]
-                    composite.paste(img, (x, y), img)
-            
-            # Convert to numpy array
-            img_array = np.array(composite)
-            
-            # Create ImageClip
-            start_time = words_data[i]['start']
-            if i < len(words_data) - 1:
-                end_time = words_data[i + 1]['start']
-                duration = end_time - start_time
-            else:
-                end_time = words_data[i]['end']
-                duration = end_time - start_time
-            
-            clip = ImageClip(img_array, duration=duration)
-            clip = clip.set_start(start_time)
-            clip = clip.set_position((0, 0))
-            
-            all_clips.append(clip)
-        
-        logger.info(f"Created {len(all_clips)} cumulative clips")
-        return all_clips
-    
-    def create_video(self, words_data: List[Dict], audio_path: str, output_path: str):
-        """Create final video with subtitles"""
-        logger.info("Creating final video...")
-        
-        try:
-            layout, size = self.get_random_style()
-            
-            # Create subtitle clips
-            subtitle_clips = self.create_subtitle_clips(words_data, layout, size)
-            
-            # Load audio
-            audio_clip = AudioFileClip(audio_path)
-            
-            # Set video audio
-            video_with_audio = self.video.set_audio(audio_clip)
-            
-            # Composite video with subtitles
-            logger.info("Compositing video with subtitles...")
-            final_video = CompositeVideoClip([video_with_audio] + subtitle_clips)
-            final_video = final_video.set_duration(audio_clip.duration)
-            
-            # Write video
-            logger.info(f"Writing video: {output_path}")
-            final_video.write_videofile(
-                output_path,
-                codec='libx264',
-                audio_codec='aac',
-                fps=24,
-                preset='ultrafast',
-                threads=4,
-                bitrate='3000k'
-            )
-            
-            # Cleanup
-            for clip in subtitle_clips:
-                clip.close()
-            final_video.close()
-            audio_clip.close()
-            
-            logger.info(f"SUCCESS: {output_path}")
-            
-        except Exception as e:
-            logger.error(f"Video creation failed: {e}")
-            raise
+    return ImageFont.load_default()
 
+
+def render_subtitle_frame(
+    words_so_far: List[str],
+    video_h: int = VIDEO_H,
+    video_w: int = VIDEO_W,
+) -> np.ndarray:
+    """Render transparent RGBA frame with cumulative subtitle words."""
+    img = Image.new("RGBA", (video_w, video_h), (0, 0, 0, 0))
+    if not words_so_far:
+        return np.array(img)
+
+    draw = ImageDraw.Draw(img)
+    font_size = max(52, int(video_w * 0.055))
+    font = _get_font(font_size)
+    stroke_w = max(3, font_size // 18)
+
+    # Wrap words into lines
+    max_line_w = int(video_w * 0.88)
+    lines: List[List[str]] = []
+    current: List[str] = []
+    for word in words_so_far:
+        test = " ".join(current + [word])
+        bbox = draw.textbbox((0, 0), test, font=font)
+        if bbox[2] - bbox[0] > max_line_w and current:
+            lines.append(current)
+            current = [word]
+        else:
+            current.append(word)
+    if current:
+        lines.append(current)
+
+    # Keep last 3 lines max
+    lines = lines[-3:]
+
+    line_h = font_size + int(font_size * 0.25)
+    total_h = len(lines) * line_h
+    # Position: 30% from top (above photo area)
+    start_y = int(video_h * 0.28) - total_h // 2
+
+    for li, line_words in enumerate(lines):
+        text = " ".join(line_words)
+        bbox = draw.textbbox((0, 0), text, font=font)
+        tw = bbox[2] - bbox[0]
+        x = (video_w - tw) // 2
+        y = start_y + li * line_h
+
+        # Shadow
+        draw.text((x + 3, y + 3), text, font=font, fill=(0, 0, 0, 120))
+        # Stroke
+        for dx in range(-stroke_w, stroke_w + 1):
+            for dy in range(-stroke_w, stroke_w + 1):
+                if dx != 0 or dy != 0:
+                    draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0, 200))
+        # Main text — last word highlighted
+        words_in_line = line_words
+        if li == len(lines) - 1 and words_in_line:
+            # Draw all but last word in white
+            prefix = " ".join(words_in_line[:-1])
+            if prefix:
+                draw.text((x, y), prefix + " ", font=font, fill=(255, 255, 255, 255))
+                prefix_bbox = draw.textbbox((0, 0), prefix + " ", font=font)
+                last_x = x + (prefix_bbox[2] - prefix_bbox[0])
+            else:
+                last_x = x
+            # Last word in cyan
+            draw.text((last_x, y), words_in_line[-1], font=font, fill=(100, 220, 255, 255))
+        else:
+            draw.text((x, y), text, font=font, fill=(255, 255, 255, 255))
+
+    return np.array(img)
+
+
+# ══════════════════════════════════════════════════════════════
+# MAIN PIPELINE
+# ══════════════════════════════════════════════════════════════
 
 class AutoSubtitlePipeline:
-    """Main pipeline"""
-    
-    def __init__(self, video_path: str, caption_text: str, voice_gender: str = 'male', output_dir: str = "output"):
-        self.video_path = video_path
-        self.caption_text = caption_text
+    def __init__(
+        self,
+        photo_path: str,
+        caption_text: str,
+        voice_gender: str = "male",
+        photo_position: str = "center",
+        output_dir: str = "/tmp/infinity_out",
+    ):
+        self.photo_path = photo_path
+        self.caption_text = caption_text.strip()
         self.voice_gender = voice_gender
+        self.photo_position = photo_position
         self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(exist_ok=True)
-        self.temp_dir = self.output_dir / "temp"
-        self.temp_dir.mkdir(exist_ok=True)
-        
-        logger.info("="*80)
-        logger.info("AUTO SUBTITLE PIPELINE v3.0 (FIXED)")
-        logger.info("="*80)
-    
-    async def run(self):
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            logger.info("\nSTEP 1: GENERATING TTS")
-            tts_path = self.temp_dir / f"tts_raw_{timestamp}.mp3"
-            voice_gen = VoiceOverGenerator(language='id', gender=self.voice_gender)
-            await voice_gen.generate_tts(self.caption_text, str(tts_path))
-            
-            logger.info("\nSTEP 2: ENHANCING AUDIO")
-            enhanced_path = self.temp_dir / f"tts_enhanced_{timestamp}.mp3"
-            voice_gen.enhance_audio(str(tts_path), str(enhanced_path))
-            
-            logger.info("\nSTEP 3: ANALYZING TIMINGS")
-            words_data = await voice_gen.generate_word_timings(
-                self.caption_text, str(enhanced_path)
-            )
-            
-            timings_json = self.output_dir / f"timings_{timestamp}.json"
-            with open(timings_json, 'w', encoding='utf-8') as f:
-                json.dump(words_data, f, indent=2, ensure_ascii=False)
-            
-            logger.info("\nSTEP 4: CREATING VIDEO")
-            video_creator = VideoSubtitleCreator(self.video_path)
-            
-            output_video = self.output_dir / f"output_video_{timestamp}.mp4"
-            video_creator.create_video(words_data, str(enhanced_path), str(output_video))
-            
-            logger.info("\n" + "="*80)
-            logger.info("SUCCESS!")
-            logger.info("="*80)
-            logger.info(f"Output: {output_video}")
-            
-            return str(output_video)
-            
-        except Exception as e:
-            logger.error(f"\nFailed: {e}")
-            raise
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.tmp_dir = Path("/tmp/infinity_tmp")
+        self.tmp_dir.mkdir(parents=True, exist_ok=True)
+        logger.info("Pipeline init: photo=%s pos=%s voice=%s", photo_path, photo_position, voice_gender)
 
+    async def run(self) -> str:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-def select_video_file() -> str:
-    root = Tk()
-    root.withdraw()
-    file_path = filedialog.askopenfilename(
-        title="Pilih Video File",
-        filetypes=[("Video files", "*.mp4 *.avi *.mov *.mkv"), ("All files", "*.*")]
-    )
-    root.destroy()
-    return file_path
+        # ── Step 1: TTS ──
+        logger.info("Step 1: TTS generation")
+        tts_raw = str(self.tmp_dir / f"tts_raw_{ts}.mp3")
+        tts_enh = str(self.tmp_dir / f"tts_enh_{ts}.mp3")
+        vg = VoiceOverGenerator(self.voice_gender)
+        await vg.generate(self.caption_text, tts_raw)
 
+        # ── Step 2: Enhance audio ──
+        logger.info("Step 2: Audio enhancement")
+        VoiceOverGenerator.enhance(tts_raw, tts_enh)
 
-def main():
-    print("="*80)
-    print("AUTO SUBTITLE & VOICE OVER v3.0 (COMPLETELY FIXED)")
-    print("="*80)
-    print()
-    
-    print("Pilih video...")
-    video_path = select_video_file()
-    if not video_path:
-        print("Cancelled.")
-        return
-    
-    print(f"Video: {video_path}")
-    print("\nMasukkan caption (Enter 2x untuk selesai):")
-    
-    lines = []
-    while True:
-        line = input()
-        if line:
-            lines.append(line)
-        else:
-            if lines:
-                break
-    
-    caption_text = " ".join(lines)
-    if not caption_text:
-        print("Caption kosong.")
-        return
-    
-    print(f"\nCaption: {caption_text[:100]}...")
-    
-    # Voice selection
-    print("\nPilih suara AI:")
-    print("1. Cowok (Ardi - Male)")
-    print("2. Cewek (Gadis - Female)")
-    voice_choice = input("Pilihan (1/2): ").strip()
-    
-    if voice_choice == '2':
-        voice_gender = 'female'
-        print("Suara: Cewek (Gadis)")
-    else:
-        voice_gender = 'male'
-        print("Suara: Cowok (Ardi)")
-    
-    confirm = input("\nMulai? (y/n): ")
-    if confirm.lower() != 'y':
-        print("Cancelled.")
-        return
-    
-    print("\nProcessing...\n")
-    
-    pipeline = AutoSubtitlePipeline(video_path, caption_text, voice_gender=voice_gender)
-    
-    try:
-        output_video = asyncio.run(pipeline.run())
-        print("\n" + "="*80)
-        print("SUCCESS!")
-        print("="*80)
-        print(f"Output: {output_video}\n")
-    except Exception as e:
-        print(f"\nERROR: {e}\n")
-        logger.exception("Full trace:")
+        # ── Step 3: Word timings ──
+        logger.info("Step 3: Word timings")
+        timings = VoiceOverGenerator.word_timings(self.caption_text, tts_enh)
+        duration = timings[-1]["end"] if timings else 3.0
+        logger.info("Duration: %.2fs, words: %d", duration, len(timings))
 
+        # ── Step 4: Build video frames ──
+        logger.info("Step 4: Building video")
+        output_path = str(self.output_dir / f"hero_{ts}.mp4")
+        self._render_video(timings, duration, tts_enh, output_path)
 
-if __name__ == "__main__":
-    main()
+        logger.info("Done: %s", output_path)
+        return output_path
+
+    def _render_video(
+        self,
+        timings: List[Dict],
+        duration: float,
+        audio_path: str,
+        output_path: str,
+    ) -> None:
+        total_frames = int(duration * FPS)
+        seed = hash(self.caption_text) % 1000
+
+        # Pre-render background
+        bg = make_background(seed)
+
+        # Build photo slide-up animation duration (first 1.2s)
+        slide_duration = min(1.2, duration * 0.25)
+
+        # Build word index lookup: frame → words shown so far
+        word_frames: Dict[int, List[str]] = {}
+        for wd in timings:
+            start_f = int(wd["start"] * FPS)
+            for f in range(start_f, total_frames):
+                if f not in word_frames:
+                    word_frames[f] = []
+                word_frames[f].append(wd["word"])
+
+        def make_frame(t: float) -> np.ndarray:
+            frame_idx = int(t * FPS)
+
+            # Photo slide-up progress
+            progress = min(1.0, t / slide_duration) if slide_duration > 0 else 1.0
+
+            # Composite photo onto background
+            frame = composite_photo(bg, self.photo_path, self.photo_position, progress)
+
+            # Overlay subtitles
+            words_so_far = word_frames.get(frame_idx, [])
+            sub_frame = render_subtitle_frame(words_so_far)
+            sub_img = Image.fromarray(sub_frame)
+            base_img = Image.fromarray(frame).convert("RGBA")
+            base_img.paste(sub_img, (0, 0), sub_img)
+
+            return np.array(base_img.convert("RGB"))
+
+        # Create video clip
+        video_clip = ColorClip(size=(VIDEO_W, VIDEO_H), color=[0, 0, 0], duration=duration)
+        video_clip = video_clip.fl(lambda gf, t: make_frame(t), apply_to=["mask"])
+
+        # Use ImageClip with make_frame directly
+        from moviepy.editor import VideoClip
+        video = VideoClip(make_frame, duration=duration)
+        audio = AudioFileClip(audio_path)
+        final = video.set_audio(audio)
+
+        logger.info("Writing MP4: %s", output_path)
+        final.write_videofile(
+            output_path,
+            fps=FPS,
+            codec="libx264",
+            audio_codec="aac",
+            preset="ultrafast",
+            threads=2,
+            bitrate="3000k",
+            logger=None,
+        )
+        final.close()
+        audio.close()

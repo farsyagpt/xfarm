@@ -203,6 +203,8 @@ app.post('/api/jobs/:id/start', async (c) => {
   const jobId = c.req.param('id');
   const job = await getJob(c.env, jobId);
   if (!job || job.user_id !== user.id) return json({ error: 'Not found' }, { status: 404 });
+  // Prevent duplicate enqueue
+  if (job.status !== 'queued') return json({ error: 'Job already started' }, { status: 409 });
 
   await c.env.JOBS.send({ jobId });
   return json({ ok: true });
@@ -252,6 +254,27 @@ app.get('/api/jobs/:id/download', async (c) => {
 
   const url = await presignGet(c.env, job.output_key, 60 * 10);
   return c.redirect(url, 302);
+});
+
+// ─────────────────────────────────────────────────────────────
+// WEBHOOK — called by HF Space when async job completes
+// ─────────────────────────────────────────────────────────────
+app.post('/api/webhook/job-done', async (c) => {
+  const secret = c.req.header('x-webhook-secret') || '';
+  if (!secret || secret !== c.env.ADMIN_SECRET) return json({ error: 'Forbidden' }, { status: 403 });
+
+  const body = await c.req.json<{ job_id: string; output_key?: string; error?: string }>();
+  if (!body.job_id) return json({ error: 'job_id required' }, { status: 400 });
+
+  if (body.error) {
+    await markJobFailed(c.env, body.job_id, body.error);
+  } else if (body.output_key) {
+    await markJobDone(c.env, body.job_id, body.output_key);
+  } else {
+    return json({ error: 'output_key or error required' }, { status: 400 });
+  }
+
+  return json({ ok: true });
 });
 
 export default {
