@@ -24,15 +24,12 @@ export const CreateJobSchema = z.object({
 });
 export type CreateJobInput = z.infer<typeof CreateJobSchema>;
 
-export const CreateJobResultSchema = z.object({
-  jobId: z.string(),
-});
-export type CreateJobResult = z.infer<typeof CreateJobResultSchema>;
-
 export const MeSchema = z.object({
   id: z.string(),
   email: z.string().email(),
   status: UserStatusSchema,
+  tokens: z.number(),
+  role: z.enum(['user', 'admin']),
 });
 export type Me = z.infer<typeof MeSchema>;
 
@@ -47,3 +44,14 @@ export const JobSchema = z.object({
 });
 export type Job = z.infer<typeof JobSchema>;
 
+// Token constants (shared between frontend and backend)
+export const TOKEN_COST = {
+  infinity:  20_000,
+  trendline: 12_000,
+  xfarm:      4_000,
+} as const;
+
+export const TOKENS_PER_PACKAGE = 400_000;
+export const PRICE_PER_PACKAGE  = 50_000; // IDR
+export const CONTENT_PER_PACKAGE = 100;
+export const TOKENS_PER_CONTENT  = 4_000;

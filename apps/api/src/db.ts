@@ -1,11 +1,20 @@
 import type { Env } from './env';
 import { nowIso } from './utils';
 
+// ── Token costs per job type ──
+export const TOKEN_COST: Record<string, number> = {
+  infinity:  20_000,  // 5 content × 4000
+  trendline: 12_000,  // 3 content × 4000
+  xfarm:      4_000,  // 1 content × 4000 (per item, but we charge flat per job)
+};
+
 export type DbUser = {
   id: string;
   email: string;
   password_hash: string;
   status: 'pending_payment' | 'active' | 'suspended';
+  tokens: number;
+  role: 'user' | 'admin';
   created_at: string;
 };
 
@@ -22,16 +31,53 @@ export async function getUserById(env: Env, id: string): Promise<DbUser | null> 
 export async function createUser(env: Env, user: { id: string; email: string; passwordHash: string }) {
   const now = nowIso();
   await env.DB.prepare(
-    'INSERT INTO users (id, email, password_hash, status, created_at) VALUES (?, ?, ?, ?, ?)',
-  )
-    .bind(user.id, user.email, user.passwordHash, 'pending_payment', now)
-    .run();
+    'INSERT INTO users (id, email, password_hash, status, tokens, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  ).bind(user.id, user.email, user.passwordHash, 'pending_payment', 0, 'user', now).run();
 }
 
 export async function setUserStatus(env: Env, userId: string, status: DbUser['status']) {
   await env.DB.prepare('UPDATE users SET status = ? WHERE id = ?').bind(status, userId).run();
 }
 
+export async function topupTokens(env: Env, userId: string, amount: number, txnId: string) {
+  const now = nowIso();
+  await env.DB.prepare('UPDATE users SET tokens = tokens + ? WHERE id = ?').bind(amount, userId).run();
+  await env.DB.prepare(
+    'INSERT INTO token_txns (id, user_id, delta, reason, job_id, created_at) VALUES (?, ?, ?, ?, NULL, ?)',
+  ).bind(txnId, userId, amount, 'topup', now).run();
+}
+
+/**
+ * Deduct tokens atomically. Returns false if insufficient balance.
+ */
+export async function deductTokens(
+  env: Env,
+  userId: string,
+  amount: number,
+  reason: string,
+  jobId: string,
+): Promise<boolean> {
+  // Check balance first
+  const user = await getUserById(env, userId);
+  if (!user || user.tokens < amount) return false;
+
+  const now = nowIso();
+  await env.DB.prepare('UPDATE users SET tokens = tokens - ? WHERE id = ? AND tokens >= ?')
+    .bind(amount, userId, amount).run();
+  await env.DB.prepare(
+    'INSERT INTO token_txns (id, user_id, delta, reason, job_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).bind(`txn_${jobId}`, userId, -amount, reason, jobId, now).run();
+  return true;
+}
+
+export async function listUsers(env: Env, limit = 100): Promise<DbUser[]> {
+  const res = await env.DB.prepare(
+    "SELECT * FROM users WHERE role = 'user' ORDER BY created_at DESC LIMIT ?",
+  ).bind(limit).all<DbUser>();
+  return res.results ?? [];
+}
+
+// ── Jobs ──
 export type DbJob = {
   id: string;
   user_id: string;
@@ -49,9 +95,7 @@ export async function createJob(env: Env, job: Omit<DbJob, 'created_at' | 'updat
   const now = nowIso();
   await env.DB.prepare(
     'INSERT INTO jobs (id, user_id, type, status, payload_json, input_key, output_key, error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)',
-  )
-    .bind(job.id, job.user_id, job.type, job.status, job.payload_json, job.input_key, now, now)
-    .run();
+  ).bind(job.id, job.user_id, job.type, job.status, job.payload_json, job.input_key, now, now).run();
 }
 
 export async function getJob(env: Env, jobId: string): Promise<DbJob | null> {
@@ -61,29 +105,23 @@ export async function getJob(env: Env, jobId: string): Promise<DbJob | null> {
 
 export async function listJobs(env: Env, userId: string, limit = 20): Promise<DbJob[]> {
   const res = await env.DB.prepare('SELECT * FROM jobs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?')
-    .bind(userId, limit)
-    .all<DbJob>();
+    .bind(userId, limit).all<DbJob>();
   return res.results ?? [];
 }
 
 export async function markJobRunning(env: Env, jobId: string) {
   const now = nowIso();
-  await env.DB.prepare('UPDATE jobs SET status = ?, updated_at = ? WHERE id = ?')
-    .bind('running', now, jobId)
-    .run();
+  await env.DB.prepare('UPDATE jobs SET status = ?, updated_at = ? WHERE id = ?').bind('running', now, jobId).run();
 }
 
 export async function markJobDone(env: Env, jobId: string, outputKey: string) {
   const now = nowIso();
   await env.DB.prepare('UPDATE jobs SET status = ?, output_key = ?, updated_at = ? WHERE id = ?')
-    .bind('done', outputKey, now, jobId)
-    .run();
+    .bind('done', outputKey, now, jobId).run();
 }
 
 export async function markJobFailed(env: Env, jobId: string, error: string) {
   const now = nowIso();
   await env.DB.prepare('UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE id = ?')
-    .bind('failed', error, now, jobId)
-    .run();
+    .bind('failed', error, now, jobId).run();
 }
-
