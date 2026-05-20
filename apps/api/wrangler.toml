@@ -4,7 +4,7 @@ compatibility_date = "2026-05-19"
 
 [vars]
 # Dev: override with actual Pages URL in production via Cloudflare dashboard
-APP_ORIGIN = "https://xfarming.pages.dev"
+APP_ORIGIN = "https://xfarm-ehd.pages.dev"
 
 # ── Secrets (set via `wrangler secret put <NAME>` or Cloudflare dashboard) ──
 # JWT_SECRET              — random 32+ char string
